@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Administration — Chez Mère Lo</title>
+<link rel="icon" href="/img/sceau.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+
+<div id="connexion" class="connexion" hidden>
+  <form id="form-connexion" class="carte-connexion">
+    <img src="/img/sceau.svg" alt="" width="72" height="72">
+    <h1>Chez Mère Lo</h1>
+    <p>Espace d'administration</p>
+    <label>Mot de passe<input type="password" name="password" autocomplete="current-password" required autofocus></label>
+    <p class="erreur" id="erreur-connexion" role="alert"></p>
+    <button class="btn">Se connecter</button>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header class="barre">
+    <div class="marque"><img src="/img/sceau.svg" alt="" width="36" height="36"><b>Mère Lo</b><span>Admin</span></div>
+    <a href="/" target="_blank" class="voir">Voir le site ↗</a>
+  </header>
+  <nav class="onglets" id="onglets">
+    <button data-onglet="commandes" class="on">Commandes <i id="badge-commandes" hidden></i></button>
+    <button data-onglet="produits">Produits &amp; stock</button>
+    <button data-onglet="accueil">Page d'accueil</button>
+    <button data-onglet="infos">Infos &amp; livraison</button>
+    <button data-onglet="compte">Compte</button>
+  </nav>
+  <main id="contenu" class="contenu"></main>
+</div>
+
+<dialog id="editeur" class="editeur"></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/admin/admin.js"></script>
+</body>
+</html>

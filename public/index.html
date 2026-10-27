@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chez Mère Lo — Tissus de luxe à Dakar</title>
+<meta name="description" content="Chez Mère Lo, maison de tissus de luxe à Dakar : bazin riche, getzner, dentelle, wax et brocart. De mère en fille, l'art du beau tissu.">
+<meta property="og:title" content="Chez Mère Lo — Tissus de luxe à Dakar">
+<meta property="og:description" content="De mère en fille, l'art du beau tissu. Bazin, getzner, dentelle, wax et brocart.">
+<meta name="theme-color" content="#0A211B">
+<link rel="icon" href="/img/sceau.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;1,6..96,400&family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/site.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="sceau" viewBox="0 0 260 260">
+      <path id="anneau" d="M130 38 a92 92 0 1 1 0 184 a92 92 0 1 1 0 -184" fill="none"/>
+      <circle cx="130" cy="130" r="118" fill="none" stroke="#C9A45C" stroke-width="1.6"/>
+      <circle cx="130" cy="130" r="112" fill="none" stroke="#C9A45C" stroke-width=".5"/>
+      <circle cx="130" cy="130" r="72" fill="none" stroke="#C9A45C" stroke-width=".9"/>
+      <g class="spin"><text transform="rotate(-42 130 130)" font-family="Manrope, sans-serif" font-weight="500" font-size="12.5" fill="#E3C78B" dominant-baseline="central"><textPath href="#anneau" textLength="578.05" lengthAdjust="spacing">&#160;CHEZ MÈRE LO&#160; ✦ &#160;DE MÈRE EN FILLE&#160; ✦ &#160;TISSUS DE LUXE&#160; ✦ &#160;DAKAR&#160; ✦&#160;</textPath></text></g>
+      <text x="130" y="150" text-anchor="middle" font-family="Bodoni Moda, serif" font-size="56" fill="#F4EEE3">ML</text>
+      <path d="M112 166h36" stroke="#C9A45C" stroke-width=".9"/>
+    </symbol>
+  </defs>
+</svg>
+
+<header id="top">
+  <a class="brand" href="#accueil" aria-label="Chez Mère Lo, accueil">
+    <svg width="52" height="52" aria-hidden="true"><use href="#sceau"/></svg>
+    <span class="brand-txt"><b>MÈRE LO</b><small>TISSUS DE LUXE · DAKAR</small></span>
+  </a>
+  <div class="head-right">
+    <nav id="menu" aria-label="Navigation principale">
+      <a href="#maison">LA MAISON</a>
+      <a href="#galerie" id="nav-galerie" hidden>GALERIE</a>
+      <a href="#boutique">BOUTIQUE</a>
+      <a href="#services">SERVICES</a>
+      <a href="#contact">CONTACT</a>
+    </nav>
+    <button class="cart-btn" id="ouvrir-panier" aria-label="Ouvrir le panier">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M5 8h14l-1.2 12H6.2z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
+      <span id="nb">0</span>
+    </button>
+    <button class="burger" id="burger" aria-label="Ouvrir le menu" aria-expanded="false">
+      <svg width="26" height="18" viewBox="0 0 26 18" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M0 1h26M0 9h26M0 17h26"/></svg>
+    </button>
+  </div>
+</header>
+
+<main>
+<section class="hero" id="accueil" aria-label="Nos collections">
+  <div id="slides"></div>
+  <div class="veil"></div>
+  <svg class="hero-seal" viewBox="0 0 260 260" aria-hidden="true"><use href="#sceau"/></svg>
+  <div class="caps" id="caps"></div>
+  <div class="hero-bar">
+    <div class="btns">
+      <a class="btn btn-or" href="#boutique">DÉCOUVRIR LA BOUTIQUE</a>
+      <a class="btn btn-ligne" href="#contact">NOUS RENDRE VISITE</a>
+    </div>
+    <div class="ctrl">
+      <span class="num" id="num"></span>
+      <div class="dots" id="dots"></div>
+    </div>
+  </div>
+  <div class="progress"><i id="prog"></i></div>
+</section>
+
+<div class="marquee" aria-hidden="true"><div id="mq"></div></div>
+
+<section id="maison">
+  <div class="wrap deux">
+    <div class="rv pile">
+      <span class="kicker">LA MAISON</span>
+      <h2 class="titre" id="maison-titre"></h2>
+    </div>
+    <div class="texte rv" id="maison-texte"></div>
+  </div>
+</section>
+
+<section class="ivoire" aria-labelledby="fondatrice">
+  <div class="wrap deux">
+    <div class="portrait rv" id="portrait"></div>
+    <div class="rv pile">
+      <span class="kicker">LA FONDATRICE</span>
+      <h2 class="titre" id="fondatrice"></h2>
+      <p class="citation" id="citation"></p>
+      <div class="texte" id="bio"></div>
+      <span class="filet"></span>
+    </div>
+  </div>
+</section>
+
+<section class="galerie" id="galerie" hidden>
+  <div class="wrap">
+    <div class="rv pile">
+      <span class="kicker">EN IMAGES</span>
+      <h2 class="titre">La maison <em>en images</em></h2>
+    </div>
+    <div class="mosaique" id="mosaique"></div>
+  </div>
+</section>
+
+<section id="services">
+  <div class="wrap">
+    <div class="rv pile">
+      <span class="kicker">NOS SERVICES</span>
+      <h2 class="titre">Un accompagnement <em>sur-mesure</em></h2>
+    </div>
+    <div class="services rv" id="liste-services"></div>
+  </div>
+</section>
+
+<section class="boutique" id="boutique">
+  <div class="wrap">
+    <div class="entete rv">
+      <div class="pile">
+        <span class="kicker">LA BOUTIQUE EN LIGNE</span>
+        <h2 class="titre">Nos pièces <em>d'exception</em></h2>
+      </div>
+    </div>
+    <div class="filtres" id="filtres" role="group" aria-label="Filtrer par matière"></div>
+    <div class="grille" id="grille"></div>
+  </div>
+</section>
+
+<section id="contact">
+  <div class="wrap deux" style="align-items:start">
+    <div class="rv pile">
+      <span class="kicker">LA BOUTIQUE</span>
+      <h2 class="titre">Venez toucher<br><em>la matière.</em></h2>
+      <p class="texte" style="margin:0" id="adresse"></p>
+      <div class="btns">
+        <a class="btn btn-or" id="wa-contact" target="_blank" rel="noopener">ÉCRIRE SUR WHATSAPP</a>
+        <a class="btn btn-ligne" id="itineraire" target="_blank" rel="noopener">ITINÉRAIRE</a>
+      </div>
+    </div>
+    <dl class="infos rv" id="infos"></dl>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div style="display:flex;align-items:center;gap:16px">
+    <svg width="64" height="64" aria-hidden="true"><use href="#sceau"/></svg>
+    <span class="acc">De mère en fille, l'art du beau tissu.</span>
+  </div>
+  <span id="pied-paiement"></span>
+  <span>© <span id="annee"></span> Chez Mère Lo</span>
+</footer>
+
+<!-- Panier -->
+<div class="voile" id="voile"></div>
+<aside class="tiroir" id="tiroir" aria-label="Panier" aria-hidden="true">
+  <div class="tiroir-tete">
+    <h2 id="tiroir-titre">Votre panier</h2>
+    <button class="fermer" id="fermer-panier" aria-label="Fermer le panier">×</button>
+  </div>
+  <div class="tiroir-corps" id="tiroir-corps"></div>
+  <div class="tiroir-pied" id="tiroir-pied"></div>
+</aside>
+
+<dialog id="fiche" aria-label="Fiche produit"></dialog>
+<dialog id="visionneuse" class="visionneuse" aria-label="Photo"></dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>window.__DATA__ = /*__DATA__*/null;</script>
+<script src="/js/site.js"></script>
+</body>
+</html>
