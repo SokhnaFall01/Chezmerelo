@@ -1,15 +1,24 @@
 const path = require('node:path');
 const fs = require('node:fs');
-const { DatabaseSync } = require('node:sqlite');
+const { createClient } = require('@libsql/client');
 
+// En ligne (Vercel) : base Turso via TURSO_DATABASE_URL / TURSO_AUTH_TOKEN.
+// Sur un ordinateur : fichier SQLite local dans DATA_DIR.
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const REMOTE_URL = process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL;
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const db = new DatabaseSync(path.join(DATA_DIR, 'chezmerelo.db'));
-db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+if (!REMOTE_URL) fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!REMOTE_URL && process.env.VERCEL) {
+  console.error('TURSO_DATABASE_URL manquant : connectez une base Turso au projet Vercel.');
+}
 
-db.exec(`
+const db = createClient({
+  url: REMOTE_URL || 'file:' + path.join(DATA_DIR, 'chezmerelo.db'),
+  authToken: process.env.TURSO_AUTH_TOKEN || process.env.DATABASE_AUTH_TOKEN
+});
+
+const SCHEMA = `
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -49,7 +58,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   price      INTEGER NOT NULL,
   qty        INTEGER NOT NULL
 );
-`);
+`;
 
 // Contenu par défaut de la page d'accueil (modifiable depuis l'admin).
 const DEFAULT_SITE = {
@@ -108,40 +117,65 @@ const DEFAULT_PRODUCTS = [
   { texture: 't-bordeaux', category: 'Getzner', name: 'Getzner Bordeaux', size: 'Pièce de 5 mètres', price: 60000, stock: 5 }
 ];
 
-function getSetting(key, fallback) {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+// Les nombres SQLite arrivent parfois en BigInt : on renvoie des objets simples.
+const plain = (row) => (row ? Object.fromEntries(Object.entries(row).map(([k, v]) => [k, typeof v === 'bigint' ? Number(v) : v])) : row);
+
+async function all(sql, args = [], conn = db) {
+  return (await conn.execute({ sql, args })).rows.map(plain);
+}
+async function get(sql, args = [], conn = db) {
+  return (await all(sql, args, conn))[0];
+}
+async function run(sql, args = [], conn = db) {
+  const r = await conn.execute({ sql, args });
+  return { changes: r.rowsAffected, lastInsertRowid: r.lastInsertRowid == null ? null : Number(r.lastInsertRowid) };
+}
+
+// fn reçoit la connexion de la transaction ; tout est annulé en cas d'erreur.
+async function transaction(fn) {
+  const tx = await db.transaction('write');
+  try {
+    const result = await fn(tx);
+    await tx.commit();
+    return result;
+  } catch (err) {
+    await tx.rollback().catch(() => {});
+    throw err;
+  } finally {
+    tx.close();
+  }
+}
+
+async function getSetting(key, fallback) {
+  const row = await get('SELECT value FROM settings WHERE key = ?', [key]);
   return row ? JSON.parse(row.value) : fallback;
 }
 
-function setSetting(key, value) {
-  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-    .run(key, JSON.stringify(value));
+async function setSetting(key, value) {
+  await run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, JSON.stringify(value)]);
 }
 
-function getSite() {
+async function getSite() {
   // Fusionne avec les valeurs par défaut pour qu'un nouveau champ ait toujours une valeur.
-  const saved = getSetting('site', {});
+  const saved = await getSetting('site', {});
   const site = { ...DEFAULT_SITE, ...saved };
   for (const k of ['house', 'founder', 'contact']) site[k] = { ...DEFAULT_SITE[k], ...(saved[k] || {}) };
   return site;
 }
 
-function transaction(fn) {
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const result = fn();
-    db.exec('COMMIT');
-    return result;
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
+async function init() {
+  await db.executeMultiple(SCHEMA);
+  // INSERT OR IGNORE : si deux démarrages ont lieu en même temps, un seul ajoute les exemples.
+  const { changes } = await run("INSERT OR IGNORE INTO settings (key, value) VALUES ('seeded', 'true')");
+  if (changes) {
+    await db.batch(DEFAULT_PRODUCTS.map((p, i) => ({
+      sql: 'INSERT INTO products (name, category, size, price, stock, texture, sort) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      args: [p.name, p.category, p.size, p.price, p.stock, p.texture, i]
+    })), 'write');
   }
 }
 
-if (db.prepare('SELECT COUNT(*) AS n FROM products').get().n === 0 && !getSetting('seeded', false)) {
-  const insert = db.prepare('INSERT INTO products (name, category, size, price, stock, texture, sort) VALUES (?, ?, ?, ?, ?, ?, ?)');
-  DEFAULT_PRODUCTS.forEach((p, i) => insert.run(p.name, p.category, p.size, p.price, p.stock, p.texture, i));
-  setSetting('seeded', true);
-}
+let ready;
+const ensureReady = () => (ready ||= init().catch((err) => { ready = null; throw err; }));
 
-module.exports = { db, DATA_DIR, UPLOAD_DIR, getSetting, setSetting, getSite, transaction, DEFAULT_SITE };
+module.exports = { db, all, get, run, transaction, getSetting, setSetting, getSite, ensureReady, UPLOAD_DIR, DEFAULT_SITE };

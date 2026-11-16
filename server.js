@@ -3,13 +3,14 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const express = require('express');
 const multer = require('multer');
-const { db, UPLOAD_DIR, getSite, setSetting, transaction } = require('./src/db');
+const { all, get, run, transaction, getSite, setSetting, ensureReady, UPLOAD_DIR } = require('./src/db');
 const auth = require('./src/auth');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, 'public');
 const STATUSES = ['nouvelle', 'confirmée', 'payée', 'livrée', 'annulée'];
+// Sur Vercel, les photos vont dans Vercel Blob ; en local, dans DATA_DIR/uploads.
+const USE_BLOB = !!process.env.BLOB_READ_WRITE_TOKEN;
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
@@ -19,6 +20,7 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
+app.use('/api', async (req, res, next) => { await ensureReady(); next(); });
 
 // ---------- Utilitaires ----------
 const str = (v, max = 500) => String(v ?? '').trim().slice(0, max);
@@ -27,8 +29,8 @@ const int = (v, min = 0, max = 1e9) => {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : min;
 };
 const imageUrl = (v) => {
-  const s = str(v, 300);
-  return /^\/uploads\/[\w.-]+$/.test(s) ? s : '';
+  const s = str(v, 400);
+  return /^\/uploads\/[\w.-]+$/.test(s) || /^https:\/\/[a-z0-9]+\.public\.blob\.vercel-storage\.com\/[\w./-]+$/i.test(s) ? s : '';
 };
 
 // Limiteur très simple, en mémoire, par adresse IP.
@@ -45,16 +47,20 @@ function limiter(max, windowMs) {
   };
 }
 
-function publicProducts() {
-  return db.prepare(`SELECT id, name, category, description, size, price, stock, image, texture
-                     FROM products WHERE visible = 1 ORDER BY sort, id`).all();
-}
+const publicProducts = () => all(`SELECT id, name, category, description, size, price, stock, image, texture
+                                  FROM products WHERE visible = 1 ORDER BY sort, id`);
+const productById = (id) => get('SELECT * FROM products WHERE id = ?', [id]);
+
+class UserError extends Error {}
 
 // ---------- Site public ----------
-const template = fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8');
-
-function renderHome(req, res) {
-  const data = { site: getSite(), products: publicProducts() };
+// En local, la page d'accueil arrive avec ses données. Sur Vercel, index.html est servi
+// tel quel par le CDN et le navigateur charge /api/public.
+let template;
+async function renderHome(req, res) {
+  await ensureReady();
+  template ||= fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8');
+  const data = { site: await getSite(), products: await publicProducts() };
   // Échappe « < » pour que le JSON ne puisse pas fermer la balise <script>.
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
   res.type('html').send(template.replace('/*__DATA__*/null', () => json));
@@ -62,9 +68,12 @@ function renderHome(req, res) {
 app.get('/', renderHome);
 app.get('/index.html', renderHome);
 
-app.get('/api/public', (req, res) => res.json({ site: getSite(), products: publicProducts() }));
+app.get('/api/public', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ site: await getSite(), products: await publicProducts() });
+});
 
-app.post('/api/orders', limiter(15, 60 * 60e3), (req, res) => {
+app.post('/api/orders', limiter(15, 60 * 60e3), async (req, res) => {
   const b = req.body || {};
   const name = str(b.name, 120);
   const phone = str(b.phone, 40);
@@ -74,17 +83,16 @@ app.post('/api/orders', limiter(15, 60 * 60e3), (req, res) => {
   const items = Array.isArray(b.items) ? b.items.slice(0, 50) : [];
   if (!items.length) return res.status(400).json({ error: 'Votre panier est vide.' });
 
-  const site = getSite();
+  const site = await getSite();
   const zone = site.delivery.find((z) => z.name === b.zone) || site.delivery[0] || { name: '', price: 0 };
   const payment = site.payments.includes(b.payment) ? b.payment : (site.payments[0] || '');
 
   try {
-    const order = transaction(() => {
-      const getProduct = db.prepare('SELECT id, name, price, stock FROM products WHERE id = ? AND visible = 1');
+    const order = await transaction(async (tx) => {
       const lines = [];
       for (const it of items) {
         const qty = int(it.qty, 1, 99);
-        const p = getProduct.get(int(it.id));
+        const p = await get('SELECT id, name, price, stock FROM products WHERE id = ? AND visible = 1', [int(it.id)], tx);
         if (!p) throw new UserError('Un article de votre panier n\'est plus disponible.');
         if (p.stock < qty) {
           throw new UserError(p.stock === 0 ? `« ${p.name} » est épuisé.` : `Il ne reste que ${p.stock} pièce(s) de « ${p.name} ».`);
@@ -93,17 +101,16 @@ app.post('/api/orders', limiter(15, 60 * 60e3), (req, res) => {
       }
       const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
       const total = subtotal + int(zone.price);
-      const { lastInsertRowid: id } = db.prepare(
+      const { lastInsertRowid: id } = await run(
         `INSERT INTO orders (name, phone, address, zone, delivery, payment, note, subtotal, total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(name, phone, str(b.address, 300), zone.name, int(zone.price), payment, str(b.note, 1000), subtotal, total);
-      const addItem = db.prepare('INSERT INTO order_items (order_id, product_id, name, price, qty) VALUES (?, ?, ?, ?, ?)');
-      const decStock = db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?');
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [name, phone, str(b.address, 300), zone.name, int(zone.price), payment, str(b.note, 1000), subtotal, total], tx
+      );
       for (const l of lines) {
-        addItem.run(id, l.id, l.name, l.price, l.qty);
-        decStock.run(l.qty, l.id);
+        await run('INSERT INTO order_items (order_id, product_id, name, price, qty) VALUES (?, ?, ?, ?, ?)', [id, l.id, l.name, l.price, l.qty], tx);
+        await run('UPDATE products SET stock = stock - ? WHERE id = ?', [l.qty, l.id], tx);
       }
-      return { id: Number(id), subtotal, total, delivery: int(zone.price), zone: zone.name, payment, lines: lines.map(({ name, price, qty }) => ({ name, price, qty })) };
+      return { id, subtotal, total, delivery: int(zone.price), zone: zone.name, payment, lines: lines.map(({ name, price, qty }) => ({ name, price, qty })) };
     });
     res.status(201).json(order);
   } catch (err) {
@@ -112,44 +119,47 @@ app.post('/api/orders', limiter(15, 60 * 60e3), (req, res) => {
   }
 });
 
-class UserError extends Error {}
-
 // ---------- Admin : connexion ----------
-app.post('/api/admin/login', limiter(10, 15 * 60e3), (req, res) => {
-  if (!auth.checkPassword(req.body?.password)) return res.status(401).json({ error: 'Mot de passe incorrect' });
-  auth.login(req, res);
+app.post('/api/admin/login', limiter(10, 15 * 60e3), async (req, res) => {
+  if (!(await auth.checkPassword(req.body?.password))) return res.status(401).json({ error: 'Mot de passe incorrect' });
+  await auth.login(req, res);
   res.json({ ok: true });
 });
 app.post('/api/admin/logout', (req, res) => { auth.logout(req, res); res.json({ ok: true }); });
-app.get('/api/admin/me', (req, res) => res.json({ admin: auth.isAdmin(req) }));
+app.get('/api/admin/me', async (req, res) => res.json({ admin: await auth.isAdmin(req) }));
 
 const admin = express.Router();
 admin.use(auth.requireAdmin);
+admin.use((req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
-admin.post('/password', (req, res) => {
+admin.post('/password', async (req, res) => {
   const { current, next } = req.body || {};
-  if (!auth.checkPassword(current)) return res.status(400).json({ error: 'Mot de passe actuel incorrect' });
+  if (!(await auth.checkPassword(current))) return res.status(400).json({ error: 'Mot de passe actuel incorrect' });
   if (String(next || '').length < 8) return res.status(400).json({ error: 'Le nouveau mot de passe doit faire au moins 8 caractères' });
-  auth.setPassword(String(next));
-  auth.login(req, res);
+  await auth.setPassword(String(next));
+  await auth.login(req, res);
   res.json({ ok: true });
 });
 
 // ---------- Admin : photos ----------
+const EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
+// 4 Mo max : limite des requêtes sur Vercel (les photos sont réduites dans le navigateur avant l'envoi).
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: UPLOAD_DIR,
-    filename: (req, file, cb) => {
-      const ext = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }[file.mimetype];
-      cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`);
-    }
-  }),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
-  fileFilter: (req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype))
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) => cb(null, !!EXT[file.mimetype])
 });
-admin.post('/upload', upload.single('photo'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Format accepté : JPG, PNG ou WebP (10 Mo max).' });
-  res.json({ url: `/uploads/${req.file.filename}` });
+admin.post('/upload', upload.single('photo'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Format accepté : JPG, PNG ou WebP (4 Mo max).' });
+  const filename = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${EXT[req.file.mimetype]}`;
+  if (USE_BLOB) {
+    const { put } = require('@vercel/blob');
+    const blob = await put(`photos/${filename}`, req.file.buffer, { access: 'public', contentType: req.file.mimetype });
+    return res.json({ url: blob.url });
+  }
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  fs.writeFileSync(path.join(UPLOAD_DIR, filename), req.file.buffer);
+  res.json({ url: `/uploads/${filename}` });
 });
 
 // ---------- Admin : produits & stock ----------
@@ -166,95 +176,100 @@ function productFields(b) {
   };
 }
 
-admin.get('/products', (req, res) => {
-  res.json(db.prepare('SELECT * FROM products ORDER BY sort, id').all());
+admin.get('/products', async (req, res) => {
+  res.json(await all('SELECT * FROM products ORDER BY sort, id'));
 });
 
-admin.post('/products', (req, res) => {
+admin.post('/products', async (req, res) => {
   const p = productFields(req.body || {});
   if (!p.name || !p.category) return res.status(400).json({ error: 'Nom et catégorie obligatoires' });
-  const sort = db.prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM products').get().s;
-  const { lastInsertRowid } = db.prepare(
+  const { s: sort } = await get('SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM products');
+  const { lastInsertRowid } = await run(
     `INSERT INTO products (name, category, description, size, price, stock, image, visible, sort)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(p.name, p.category, p.description, p.size, p.price, p.stock, p.image, p.visible, sort);
-  res.status(201).json(db.prepare('SELECT * FROM products WHERE id = ?').get(lastInsertRowid));
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [p.name, p.category, p.description, p.size, p.price, p.stock, p.image, p.visible, sort]
+  );
+  res.status(201).json(await productById(lastInsertRowid));
 });
 
-admin.put('/products/:id', (req, res) => {
+admin.put('/products/:id', async (req, res) => {
   const p = productFields(req.body || {});
   if (!p.name || !p.category) return res.status(400).json({ error: 'Nom et catégorie obligatoires' });
-  const r = db.prepare(
+  const id = int(req.params.id);
+  const r = await run(
     `UPDATE products SET name = ?, category = ?, description = ?, size = ?, price = ?, stock = ?, image = ?, visible = ?
-     WHERE id = ?`
-  ).run(p.name, p.category, p.description, p.size, p.price, p.stock, p.image, p.visible, int(req.params.id));
+     WHERE id = ?`,
+    [p.name, p.category, p.description, p.size, p.price, p.stock, p.image, p.visible, id]
+  );
   if (!r.changes) return res.status(404).json({ error: 'Produit introuvable' });
-  res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(int(req.params.id)));
+  res.json(await productById(id));
 });
 
-admin.patch('/products/:id/stock', (req, res) => {
+admin.patch('/products/:id/stock', async (req, res) => {
   const id = int(req.params.id);
-  db.prepare('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?').run(int(req.body?.delta, -100000, 100000), id);
-  const p = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+  await run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [int(req.body?.delta, -100000, 100000), id]);
+  const p = await productById(id);
   if (!p) return res.status(404).json({ error: 'Produit introuvable' });
   res.json(p);
 });
 
-admin.patch('/products/:id/visible', (req, res) => {
+admin.patch('/products/:id/visible', async (req, res) => {
   const id = int(req.params.id);
-  db.prepare('UPDATE products SET visible = ? WHERE id = ?').run(req.body?.visible ? 1 : 0, id);
-  res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(id));
+  await run('UPDATE products SET visible = ? WHERE id = ?', [req.body?.visible ? 1 : 0, id]);
+  res.json(await productById(id));
 });
 
-admin.post('/products/order', (req, res) => {
+admin.post('/products/order', async (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((x) => int(x)) : [];
-  const upd = db.prepare('UPDATE products SET sort = ? WHERE id = ?');
-  transaction(() => ids.forEach((id, i) => upd.run(i, id)));
+  await transaction(async (tx) => {
+    for (const [i, id] of ids.entries()) await run('UPDATE products SET sort = ? WHERE id = ?', [i, id], tx);
+  });
   res.json({ ok: true });
 });
 
-admin.delete('/products/:id', (req, res) => {
-  db.prepare('DELETE FROM products WHERE id = ?').run(int(req.params.id));
+admin.delete('/products/:id', async (req, res) => {
+  await run('DELETE FROM products WHERE id = ?', [int(req.params.id)]);
   res.json({ ok: true });
 });
 
 // ---------- Admin : commandes ----------
-admin.get('/orders', (req, res) => {
-  const orders = db.prepare('SELECT * FROM orders ORDER BY id DESC LIMIT 500').all();
-  const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?');
-  res.json(orders.map((o) => ({ ...o, items: items.all(o.id) })));
+admin.get('/orders', async (req, res) => {
+  const orders = await all('SELECT * FROM orders ORDER BY id DESC LIMIT 500');
+  const items = orders.length
+    ? await all(`SELECT * FROM order_items WHERE order_id IN (${orders.map(() => '?').join(',')})`, orders.map((o) => o.id))
+    : [];
+  res.json(orders.map((o) => ({ ...o, items: items.filter((i) => i.order_id === o.id) })));
 });
 
-admin.patch('/orders/:id', (req, res) => {
+admin.patch('/orders/:id', async (req, res) => {
   const id = int(req.params.id);
   const status = String(req.body?.status || '');
   if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Statut inconnu' });
-  const updated = transaction(() => {
-    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+  const updated = await transaction(async (tx) => {
+    const order = await get('SELECT * FROM orders WHERE id = ?', [id], tx);
     if (!order) return null;
     // Annuler une commande remet les pièces en stock ; la réactiver les retire à nouveau.
     const wasCancelled = order.status === 'annulée';
     const isCancelled = status === 'annulée';
     if (wasCancelled !== isCancelled) {
       const sign = isCancelled ? 1 : -1;
-      const upd = db.prepare('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?');
-      for (const it of db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(id)) {
-        if (it.product_id) upd.run(sign * it.qty, it.product_id);
+      for (const it of await all('SELECT * FROM order_items WHERE order_id = ?', [id], tx)) {
+        if (it.product_id) await run('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [sign * it.qty, it.product_id], tx);
       }
     }
-    db.prepare('UPDATE orders SET status = ? WHERE id = ?').run(status, id);
-    return db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    await run('UPDATE orders SET status = ? WHERE id = ?', [status, id], tx);
+    return get('SELECT * FROM orders WHERE id = ?', [id], tx);
   });
   if (!updated) return res.status(404).json({ error: 'Commande introuvable' });
   res.json(updated);
 });
 
 // ---------- Admin : contenu de la page d'accueil ----------
-admin.get('/site', (req, res) => res.json(getSite()));
+admin.get('/site', async (req, res) => res.json(await getSite()));
 
-admin.put('/site', (req, res) => {
+admin.put('/site', async (req, res) => {
   const b = req.body || {};
-  const cur = getSite();
+  const cur = await getSite();
   const list = (v, max, map) => (Array.isArray(v) ? v.slice(0, max).map(map) : []);
   const site = {
     hero: list(b.hero, 8, (s) => ({
@@ -275,13 +290,13 @@ admin.put('/site', (req, res) => {
   };
   if (!site.hero.length) site.hero = cur.hero;
   site.contact.whatsapp = site.contact.whatsapp.replace(/\D/g, '');
-  setSetting('site', site);
+  await setSetting('site', site);
   res.json(site);
 });
 
 app.use('/api/admin', admin);
 
-// ---------- Fichiers statiques ----------
+// ---------- Fichiers statiques (en local ; sur Vercel, le CDN sert public/) ----------
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true }));
 app.use(express.static(PUBLIC, { index: false }));
 app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC, 'admin', 'index.html')));
@@ -291,7 +306,11 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Erreur serveur' });
 });
 
-app.listen(PORT, () => {
-  auth.storedHash();
-  console.log(`Chez Mère Lo en ligne sur http://localhost:${PORT}  —  admin : http://localhost:${PORT}/admin`);
-});
+module.exports = app;
+
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  ensureReady().then(() => auth.storedHash()).then(() => {
+    app.listen(PORT, () => console.log(`Chez Mère Lo en ligne sur http://localhost:${PORT}  —  admin : http://localhost:${PORT}/admin`));
+  });
+}

@@ -21,7 +21,7 @@ Les photos prises au téléphone sont automatiquement réduites avant l'envoi po
 
 ## Lancer le site sur un ordinateur
 
-Il faut [Node.js](https://nodejs.org) version 22.13 ou plus récente.
+Il faut [Node.js](https://nodejs.org) version 20 ou plus récente.
 
 ```bash
 npm install
@@ -35,19 +35,27 @@ Sans `ADMIN_PASSWORD`, le mot de passe initial est `merelo2026` : changez-le tou
 
 Les produits de départ (prix et stocks) sont des **exemples** : modifiez-les ou supprimez-les dans l'admin avant la mise en ligne.
 
-## Mise en ligne
+## Mise en ligne sur Vercel
 
-Toutes les données (produits, commandes, textes, photos) sont dans le dossier `data/` (ou celui indiqué par la variable `DATA_DIR`). Il doit être sur un **disque persistant** et sauvegardé régulièrement.
+Sur Vercel, le serveur ne garde aucun fichier : les produits, commandes et textes vont dans une base **Turso**, les photos dans **Vercel Blob**. Les deux ont une offre gratuite suffisante pour démarrer.
 
-Variables d'environnement :
+1. **Importer le projet** : sur vercel.com → *Add New… → Project* → choisir le dépôt GitHub `Chezmerelo` → *Deploy* (aucun réglage à changer, `vercel.json` s'en occupe).
+2. **Photos** : dans le projet → onglet *Storage* → *Create* → **Blob** → le connecter au projet. La variable `BLOB_READ_WRITE_TOKEN` est ajoutée toute seule.
+3. **Base de données** : onglet *Storage* → **Turso** (Marketplace) → créer une base et la connecter au projet.
+   Les variables `TURSO_DATABASE_URL` et `TURSO_AUTH_TOKEN` sont ajoutées. Si vous créez la base directement sur turso.tech, ajoutez ces deux variables à la main dans *Settings → Environment Variables*.
+4. **Mot de passe admin** : *Settings → Environment Variables* → ajouter `ADMIN_PASSWORD` avec un mot de passe solide (utilisé au tout premier lancement ; ensuite il se change dans l'admin).
+5. **Redéployer** : onglet *Deployments* → *Redeploy*, pour que les variables soient prises en compte.
+6. Ouvrir `https://votre-projet.vercel.app/admin` et se connecter.
+7. (Facultatif) **Nom de domaine** : *Settings → Domains* → ajouter par exemple `chezmerelo.com`.
 
 | Variable | Rôle |
 |---|---|
-| `PORT` | Port d'écoute (3000 par défaut) |
-| `DATA_DIR` | Dossier des données et des photos (`./data` par défaut) |
-| `ADMIN_PASSWORD` | Mot de passe admin initial (utilisé seulement au tout premier démarrage) |
+| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Base de données en ligne |
+| `BLOB_READ_WRITE_TOKEN` | Stockage des photos |
+| `ADMIN_PASSWORD` | Mot de passe admin initial |
+| `DATA_DIR`, `PORT` | Uniquement hors Vercel (dossier des données locales, port) |
 
-Hébergeurs adaptés : un petit serveur VPS, ou une plateforme comme Railway / Render / Fly.io **avec un volume persistant** monté sur `DATA_DIR`. Un `Dockerfile` est fourni.
+Ailleurs que sur Vercel (VPS, Docker…), sans ces variables, le site utilise un fichier SQLite et un dossier de photos dans `DATA_DIR` (à mettre sur un disque persistant) :
 
 ```bash
 docker build -t chezmerelo .
@@ -58,7 +66,9 @@ docker run -p 3000:3000 -v chezmerelo-data:/data -e ADMIN_PASSWORD="..." chezmer
 
 ```
 server.js            serveur (pages, API boutique et admin)
-src/db.js            base de données SQLite + contenu par défaut
+api/index.js         point d'entrée Vercel
+vercel.json          configuration Vercel
+src/db.js            base de données (Turso en ligne, SQLite en local) + contenu par défaut
 src/auth.js          connexion admin
 public/index.html    page d'accueil
 public/css/site.css  styles du site

@@ -5,13 +5,15 @@
   "description": "Chez Mère Lo — boutique de tissus de luxe à Dakar, avec espace d'administration",
   "main": "server.js",
   "engines": {
-    "node": ">=22.13"
+    "node": ">=20"
   },
   "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning server.js",
-    "dev": "node --disable-warning=ExperimentalWarning --watch server.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "@vercel/blob": "^2.9.0",
     "express": "^5.3.0",
     "multer": "^2.5.0"
   }
