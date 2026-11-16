@@ -8,10 +8,10 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const REMOTE_URL = process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL;
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 
-if (!REMOTE_URL) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!REMOTE_URL && process.env.VERCEL) {
-  console.error('TURSO_DATABASE_URL manquant : connectez une base Turso au projet Vercel.');
+  throw new Error('TURSO_DATABASE_URL manquant : connectez une base Turso au projet Vercel puis redéployez.');
 }
+if (!REMOTE_URL) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const db = createClient({
   url: REMOTE_URL || 'file:' + path.join(DATA_DIR, 'chezmerelo.db'),
